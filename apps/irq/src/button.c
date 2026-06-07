@@ -3,7 +3,7 @@
 static void button_isr (const struct device *port, struct gpio_callback *cb, \ 
                                gpio_port_pins_t pins)
 {
-	//add segger line	
+	printk("Button irq\n");	
 }
 
 int button_init (struct button * button)
@@ -12,18 +12,21 @@ int button_init (struct button * button)
 
 	if (button == NULL)
 	{
+		printk("ERR: Null button pointer\n");
 		return -EINVAL;
 	}
 
 	// verify if the device is ready
 	if (!gpio_is_ready_dt(button->button_spec))
 	{
+		printk("ERR: failed to get device ready\n");
 		return -ENODEV;
 	}
 
 	ret = gpio_pin_configure_dt(button->button_spec, GPIO_INPUT);
 	if (ret < 0)
 	{
+		printk("ERR: failed to configure button\n");
 		return ret;
 	}
 	
@@ -34,6 +37,7 @@ int button_init (struct button * button)
 	ret = gpio_add_callback_dt(button->button_spec, &button->button_cb);
 	if (ret < 0)
 	{
+		printk("ERR: failed to add isr : %d\n", ret);
 		return ret;
 	}
 
