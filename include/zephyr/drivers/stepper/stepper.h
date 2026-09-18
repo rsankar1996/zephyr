@@ -26,6 +26,11 @@ extern "C" {
  * @defgroup stepper_interface Stepper
  * @ingroup io_interfaces
  *
+ * @defgroup stepper_interface_ext Device-specific stepper API extensions
+ * @ingroup stepper_interface
+ * @{
+ * @}
+ *
  * @defgroup stepper_hw_driver Stepper Hardware Driver
  * @brief Interfaces for stepper hardware drivers
  * @ingroup stepper_interface
@@ -64,6 +69,12 @@ enum stepper_micro_step_resolution {
  */
 #define MICRO_STEP_RES_INDEX(res) LOG2(res)
 
+/**
+ * @brief Check whether a microstep resolution is valid.
+ * @param res Microstep resolution to validate.
+ *
+ * @return Non-zero if @p res is a supported micro-step resolution, zero otherwise.
+ */
 #define VALID_MICRO_STEP_RES(res)                                                                  \
 	((res) == STEPPER_MICRO_STEP_1 || (res) == STEPPER_MICRO_STEP_2 ||                 \
 	 (res) == STEPPER_MICRO_STEP_4 || (res) == STEPPER_MICRO_STEP_8 ||                 \

@@ -93,15 +93,31 @@ static void vbat_init(void)
 
 void soc_early_init_hook(void)
 {
+#if !defined(CONFIG_TRUSTED_EXECUTION_NONSECURE)
 	unsigned int oldLevel; /* old interrupt lock level */
 
 	/* disable interrupts */
 	oldLevel = irq_lock();
 
+#ifdef CONFIG_SOC_MCXW70AC
+	/* This is temporarily placed in the SoC layer.
+	 * Once TSTMR support is available, this logic should be moved to the
+	 * dedicated TSTMR implementation.
+	 */
+	CLOCK_EnableClock(kCLOCK_Tstmr0);
+	CLOCK_EnableClock(kCLOCK_Fro_hf_div);
+#endif
+
 #ifndef CONFIG_SOC_MCXW70AC
 	/* Smart power switch initialization */
 	vbat_init();
 #endif
+
+	/* Apply the active-mode DCDC output voltage from device tree. This is
+	 * required (independently of CONFIG_PM) to reach the configured BLE TX
+	 * power, and is a no-op when no voltage is configured.
+	 */
+	nxp_mcxw7x_dcdc_init();
 
 	if (IS_ENABLED(CONFIG_PM)) {
 		nxp_mcxw7x_power_init();
@@ -109,10 +125,12 @@ void soc_early_init_hook(void)
 
 	/* restore interrupt state */
 	irq_unlock(oldLevel);
+#endif /* ! CONFIG_TRUSTED_EXECUTION_NONSECURE */
 }
 
 static int soc_nbu_init(void)
 {
+#if !defined(CONFIG_TRUSTED_EXECUTION_NONSECURE)
 #if defined(CONFIG_NXP_NBU)
 	nxp_nbu_init();
 #elif defined(CONFIG_PM)
@@ -143,6 +161,7 @@ static int soc_nbu_init(void)
 	RFMC->RF2P4GHZ_CFG |= RFMC_RF2P4GHZ_CFG_FORCE_DBG_PWRUP_ACK_MASK;
 	CMC_EnableDebugOperation(MCXW7_CMC_ADDR, true);
 #endif
+#endif /* ! CONFIG_TRUSTED_EXECUTION_NONSECURE */
 	return 0;
 }
 

@@ -90,12 +90,8 @@ static struct k_thread spi_rx_thread_data;
 #define BLUENRG_CONFIG_LL_ONLY_OFFSET       0x2C
 #define BLUENRG_CONFIG_LL_ONLY_LEN          0x01
 
-struct bt_spi_data {
-	bt_hci_recv_t recv;
-};
-
 static const struct spi_dt_spec bus = SPI_DT_SPEC_INST_GET(
-	0, SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_WORD_SET(8) | SPI_LOCK_ON);
+	0, SPI_OP_MODE_CONTROLLER | SPI_TRANSFER_MSB | SPI_WORD_SET(8) | SPI_LOCK_ON);
 
 static struct spi_buf spi_tx_buf;
 static struct spi_buf spi_rx_buf;
@@ -219,8 +215,8 @@ static void release_cs(bool data_transaction)
 
 static int bt_spi_get_header(uint8_t op, uint16_t *size, uint16_t write_size)
 {
-	uint8_t header_master[5] = {op, 0, 0, 0, 0};
-	uint8_t header_slave[5];
+	uint8_t header_controller[5] = {op, 0, 0, 0, 0};
+	uint8_t header_peripheral[5];
 	uint8_t size_offset, attempts;
 	int ret;
 
@@ -248,14 +244,14 @@ static int bt_spi_get_header(uint8_t op, uint16_t *size, uint16_t write_size)
 		}
 		/* Make sure CS is raised before a new attempt */
 		gpio_pin_set_dt(&bus.config.cs.gpio, 0);
-		ret = bt_spi_transceive(header_master, 5, header_slave, 5);
+		ret = bt_spi_transceive(header_controller, 5, header_peripheral, 5);
 		if (ret) {
 			/* SPI transaction failed */
 			break;
 		}
 
-		*size = (header_slave[STATUS_HEADER_READY] == READY_NOW) ?
-				header_slave[size_offset] : 0;
+		*size = (header_peripheral[STATUS_HEADER_READY] == READY_NOW) ?
+				header_peripheral[size_offset] : 0;
 		attempts--;
 	} while ((*size == 0) && attempts);
 
@@ -282,8 +278,8 @@ static void release_cs(bool data_transaction)
 
 static int bt_spi_get_header(uint8_t op, uint16_t *size, uint16_t write_size)
 {
-	uint8_t header_master[5] = {op, 0, 0, 0, 0};
-	uint8_t header_slave[5];
+	uint8_t header_controller[5] = {op, 0, 0, 0, 0};
+	uint8_t header_peripheral[5];
 	uint16_t cs_delay;
 	uint8_t size_offset;
 	int ret;
@@ -299,8 +295,8 @@ static int bt_spi_get_header(uint8_t op, uint16_t *size, uint16_t write_size)
 		/* To make sure we have a minimum delay from previous release cs */
 		cs_delay = 100;
 		size_offset = STATUS_HEADER_TOWRITE;
-		header_master[size_offset] = write_size & 0x00FF;
-		header_master[size_offset + 1] = write_size >> 8;
+		header_controller[size_offset] = write_size & 0x00FF;
+		header_controller[size_offset + 1] = write_size >> 8;
 	} else {
 		return -EINVAL;
 	}
@@ -311,7 +307,7 @@ static int bt_spi_get_header(uint8_t op, uint16_t *size, uint16_t write_size)
 	/* Perform a zero byte SPI transaction to acquire the SPI lock and lower CS
 	 * while waiting for IRQ to be raised
 	 */
-	bt_spi_transceive(header_master, 0, header_slave, 0);
+	bt_spi_transceive(header_controller, 0, header_peripheral, 0);
 	gpio_pin_interrupt_configure_dt(&irq_gpio, GPIO_INT_DISABLE);
 
 	/* Wait up to a maximum time of 100 ms */
@@ -320,8 +316,8 @@ static int bt_spi_get_header(uint8_t op, uint16_t *size, uint16_t write_size)
 		return -EIO;
 	}
 
-	ret = bt_spi_transceive(header_master, 5, header_slave, 5);
-	*size = header_slave[size_offset] | (header_slave[size_offset + 1] << 8);
+	ret = bt_spi_transceive(header_controller, 5, header_peripheral, 5);
+	*size = header_peripheral[size_offset] | (header_peripheral[size_offset + 1] << 8);
 
 	if (DT_INST_PROP_OR(0, wait_irq_low, false)) {
 		/* Wait up to a maximum time of 10 ms */
@@ -377,7 +373,11 @@ static int bt_spi_bluenrg_setup(const struct device *dev,
 		/* force BlueNRG to be on controller mode */
 		uint8_t data = 1;
 
-		bt_spi_send_aci_config(BLUENRG_CONFIG_LL_ONLY_OFFSET, &data, 1);
+		ret = bt_spi_send_aci_config(BLUENRG_CONFIG_LL_ONLY_OFFSET, &data, 1);
+		if (ret != 0) {
+			LOG_ERR("Failed to set BlueNRG LL-only mode (%d)", ret);
+			return ret;
+		}
 	}
 
 	if (!bt_addr_eq(addr, BT_ADDR_NONE) && !bt_addr_eq(addr, BT_ADDR_ANY)) {
@@ -516,7 +516,6 @@ static int bt_spi_rx_buf_construct(uint8_t *msg, struct net_buf **bufp, uint16_t
 static void bt_spi_rx_thread(void *p1, void *p2, void *p3)
 {
 	const struct device *dev = p1;
-	struct bt_spi_data *hci = dev->data;
 
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
@@ -564,7 +563,7 @@ static void bt_spi_rx_thread(void *p1, void *p2, void *p3)
 			ret = bt_spi_rx_buf_construct(rxmsg, &buf, size);
 			if (!ret) {
 				/* Handle the received HCI data */
-				hci->recv(dev, buf);
+				bt_hci_recv(dev, buf);
 				buf = NULL;
 			}
 		} while (READ_CONDITION);
@@ -646,9 +645,8 @@ static int bt_spi_send(const struct device *dev, struct net_buf *buf)
 	return 0;
 }
 
-static int bt_spi_open(const struct device *dev, bt_hci_recv_t recv)
+static int bt_spi_open(const struct device *dev)
 {
-	struct bt_spi_data *hci = dev->data;
 	int err;
 
 	/* Configure RST pin and hold BLE in Reset */
@@ -675,8 +673,6 @@ static int bt_spi_open(const struct device *dev, bt_hci_recv_t recv)
 		return err;
 	}
 
-	hci->recv = recv;
-
 	/* Take BLE out of reset */
 	k_sleep(K_MSEC(DT_INST_PROP_OR(0, reset_assert_duration_ms, 0)));
 	gpio_pin_set_dt(&rst_gpio, 0);
@@ -697,17 +693,22 @@ static int bt_spi_open(const struct device *dev, bt_hci_recv_t recv)
 	}
 
 #if defined(CONFIG_BT_HCI_RAW) && defined(CONFIG_BT_BLUENRG_ACI)
-	/* force BlueNRG to be on controller mode */
-	uint8_t data = 1;
+	if (DT_INST_PROP_OR(0, req_ll_only, false)) {
+		/* force BlueNRG to be on controller mode */
+		uint8_t data = 1;
 
-	bt_spi_send_aci_config(BLUENRG_CONFIG_LL_ONLY_OFFSET, &data, 1);
+		err = bt_spi_send_aci_config(BLUENRG_CONFIG_LL_ONLY_OFFSET, &data, 1);
+		if (err != 0) {
+			LOG_ERR("Failed to set BlueNRG LL-only mode (%d)", err);
+			return err;
+		}
+	}
 #endif /* CONFIG_BT_HCI_RAW && CONFIG_BT_BLUENRG_ACI */
 	return 0;
 }
 
 static int bt_spi_close(const struct device *dev)
 {
-	struct bt_spi_data *hci = dev->data;
 	int ret;
 
 	gpio_pin_interrupt_configure_dt(&irq_gpio, GPIO_INT_DISABLE);
@@ -725,7 +726,6 @@ static int bt_spi_close(const struct device *dev)
 	k_sleep(K_MSEC(DT_INST_PROP_OR(0, reset_assert_duration_ms, 0)));
 	gpio_pin_set_dt(&rst_gpio, 0);
 
-	hci->recv = NULL;
 	LOG_DBG("Bluetooth disabled");
 
 	return 0;
@@ -764,9 +764,11 @@ static int bt_spi_init(const struct device *dev)
 }
 
 #define HCI_DEVICE_INIT(inst) \
-	static struct bt_spi_data hci_data_##inst = { \
+	static struct bt_hci_driver_data hci_data_##inst = { \
 	}; \
-	DEVICE_DT_INST_DEFINE(inst, bt_spi_init, NULL, &hci_data_##inst, NULL, \
+	static const struct bt_hci_driver_config hci_config_##inst =                               \
+		BT_DT_HCI_DRIVER_CONFIG_INST_GET(inst);                                            \
+	DEVICE_DT_INST_DEFINE(inst, bt_spi_init, NULL, &hci_data_##inst, &hci_config_##inst,       \
 			      POST_KERNEL, CONFIG_BT_SPI_INIT_PRIORITY, &drv)
 
 /* Only one instance supported right now */

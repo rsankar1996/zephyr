@@ -742,8 +742,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	ARG_UNUSED(reason);
 
 	if (mprx.remote_player.conn == conn) {
-		bt_conn_unref(mprx.remote_player.conn);
-		mprx.remote_player.conn = NULL;
+		bt_conn_drop(&mprx.remote_player.conn);
 	}
 }
 
@@ -753,6 +752,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 int media_proxy_ctrl_discover_player(struct bt_conn *conn)
 {
+	struct bt_conn *ref;
 	int err;
 
 	CHECKIF(!conn) {
@@ -832,17 +832,23 @@ int media_proxy_ctrl_discover_player(struct bt_conn *conn)
 		return err;
 	}
 
+	ref = bt_conn_ref(conn);
+	if (ref == NULL) {
+		return -ENOTCONN;
+	}
+
 	/* Start discovery of remote MCS, subscribe to notifications */
 	err = bt_mcc_discover_mcs(conn, 1);
 	if (err != 0) {
 		LOG_ERR("Discovery failed");
+		bt_conn_unref(ref);
 		return err;
 	}
 
 	if (mprx.remote_player.conn != NULL) {
 		bt_conn_unref(mprx.remote_player.conn);
 	}
-	mprx.remote_player.conn = bt_conn_ref(conn);
+	mprx.remote_player.conn = ref;
 	mprx.remote_player.registered = true;  /* TODO: Do MCC init and "registration" at startup */
 
 	return 0;
@@ -884,6 +890,29 @@ int media_proxy_ctrl_get_player_name(struct media_player *player)
 		return bt_mcc_read_player_name(mprx.remote_player.conn);
 	}
 #endif /* CONFIG_MCTL_REMOTE_PLAYER_CONTROL */
+
+	return -EINVAL;
+}
+
+int media_proxy_ctrl_set_player_name(struct media_player *player, const char *name)
+{
+	CHECKIF(player == NULL || name == NULL) {
+		LOG_DBG("player or name is NULL");
+		return -EINVAL;
+	}
+
+#if defined(CONFIG_MCTL_LOCAL_PLAYER_LOCAL_CONTROL)
+	if (mprx.local_player.registered && player == &mprx.local_player) {
+		if (mprx.local_player.calls->set_player_name != NULL) {
+			mprx.local_player.calls->set_player_name(name);
+
+			return 0;
+		}
+
+		LOG_DBG("No call");
+		return -EOPNOTSUPP;
+	}
+#endif /* CONFIG_MCTL_LOCAL_PLAYER_LOCAL_CONTROL */
 
 	return -EINVAL;
 }

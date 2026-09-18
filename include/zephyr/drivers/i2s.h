@@ -214,7 +214,7 @@ typedef uint8_t i2s_opt_t;
 #define I2S_OPT_PINGPONG                    BIT(6)
 
 /**
- * @brief I2C Direction
+ * @brief I2S Direction
  */
 enum i2s_dir {
 	/** Receive data */
@@ -318,7 +318,8 @@ struct i2s_config {
 	/** Size of one RX/TX memory block (buffer) in bytes. */
 	size_t block_size;
 	/** Read/Write timeout. Number of milliseconds to wait in case TX queue
-	 * is full or RX queue is empty, or 0, or SYS_FOREVER_MS.
+	 * is full or RX queue is empty, or 0, or SYS_FOREVER_MS. i2s_buf_write()
+	 * also applies it to the transmit block allocation.
 	 */
 	int32_t timeout;
 };
@@ -384,7 +385,7 @@ __subsystem struct i2s_driver_api {
  *            For those, the RX and TX streams need to be configured separately.
  * @param cfg Pointer to the structure containing configuration parameters.
  *
- * @retval 0 If successful.
+ * @retval 0 on success.
  * @retval -EINVAL Invalid argument.
  * @retval -ENOSYS I2S_DIR_BOTH value is not supported.
  */
@@ -437,7 +438,7 @@ static inline const struct i2s_config *i2s_config_get(const struct device *dev,
  * @param mem_block Pointer to the RX memory block containing received data.
  * @param size Pointer to the variable storing the number of bytes read.
  *
- * @retval 0 If successful.
+ * @retval 0 on success.
  * @retval -EIO The interface is in NOT_READY or ERROR state and there are no
  *         more data blocks in the RX queue.
  * @retval -EBUSY Returned without waiting.
@@ -467,7 +468,7 @@ static inline int i2s_read(const struct device *dev, void **mem_block,
  *            as large as the configured memory block size for the RX channel.
  * @param size Pointer to the variable storing the number of bytes read.
  *
- * @retval 0 If successful.
+ * @retval 0 on success.
  * @retval -EIO The interface is in NOT_READY or ERROR state and there are no
  *         more data blocks in the RX queue.
  * @retval -EBUSY Returned without waiting.
@@ -496,7 +497,7 @@ __syscall int i2s_buf_read(const struct device *dev, void *buf, size_t *size);
  * @param size Number of bytes to write. This value has to be equal or smaller
  *        than the size of the memory block.
  *
- * @retval 0 If successful.
+ * @retval 0 on success.
  * @retval -EIO The interface is not in READY or RUNNING state.
  * @retval -EBUSY Returned without waiting.
  * @retval -EAGAIN Waiting period timed out.
@@ -514,12 +515,16 @@ static inline int i2s_write(const struct device *dev, void *mem_block,
  * and copies the provided data buffer into it. It is otherwise equivalent
  * to i2s_write().
  *
+ * The timeout configured in @ref i2s_config applies independently to acquiring
+ * the memory block and to enqueueing it, so in the worst case this call can
+ * block for twice that period rather than once.
+ *
  * @param dev Pointer to the device structure for the driver instance.
  * @param buf Pointer to a buffer containing the data to transmit.
  * @param size Number of bytes to write. This value has to be equal or smaller
  *        than the size of the channel's TX memory block configuration.
  *
- * @retval 0 If successful.
+ * @retval 0 on success.
  * @retval -EIO The interface is not in READY or RUNNING state.
  * @retval -EBUSY Returned without waiting.
  * @retval -EAGAIN Waiting period timed out.
@@ -538,7 +543,7 @@ __syscall int i2s_buf_write(const struct device *dev, void *buf, size_t size);
  *            and TX streams.
  * @param cmd Trigger command.
  *
- * @retval 0 If successful.
+ * @retval 0 on success.
  * @retval -EINVAL Invalid argument.
  * @retval -EIO The trigger cannot be executed in the current state or a DMA
  *         channel cannot be allocated.

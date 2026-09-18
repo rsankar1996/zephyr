@@ -33,7 +33,7 @@ static void uart_sedi_cb(struct device *port);
 		IRQ_CONNECT(DT_INST_IRQN(n),			       \
 			    DT_INST_IRQ(n, priority), uart_sedi_isr,   \
 			    DEVICE_DT_GET(DT_NODELABEL(uart##n)),      \
-			    DT_INST_IRQ(n, sense));		       \
+			    DT_INST_IRQ(n, flags));		       \
 		irq_enable(DT_INST_IRQN(n));			       \
 	}
 #else /*CONFIG_UART_INTERRUPT_DRIVEN */
@@ -297,19 +297,19 @@ static int uart_sedi_err_check(const struct device *dev)
 
 	sedi_uart_get_status(instance, (uint32_t *const)&status);
 	if (status &  SEDI_UART_RX_OE) {
-		ret_status = UART_ERROR_OVERRUN;
+		ret_status |= UART_ERROR_OVERRUN;
 	}
 
 	if (status & SEDI_UART_RX_PE) {
-		ret_status = UART_ERROR_PARITY;
+		ret_status |= UART_ERROR_PARITY;
 	}
 
 	if (status & SEDI_UART_RX_FE) {
-		ret_status = UART_ERROR_FRAMING;
+		ret_status |= UART_ERROR_FRAMING;
 	}
 
 	if (status & SEDI_UART_RX_BI) {
-		ret_status = UART_BREAK;
+		ret_status |= UART_BREAK;
 	}
 
 	pm_device_runtime_put(dev);

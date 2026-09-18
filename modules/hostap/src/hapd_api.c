@@ -622,6 +622,13 @@ int hapd_config_network(struct hostapd_iface *iface,
 				   params->security);
 			goto out;
 		}
+
+		if (params->transition_disable) {
+			if (!hostapd_cli_cmd_v("set transition_disable %d",
+				   params->transition_disable)) {
+				goto out;
+			}
+		}
 	} else {
 		if (!hostapd_cli_cmd_v("set wpa 0")) {
 			goto out;
@@ -634,6 +641,10 @@ int hapd_config_network(struct hostapd_iface *iface,
 	}
 
 	if (!hostapd_cli_cmd_v("set ignore_broadcast_ssid %d", params->ignore_broadcast_ssid)) {
+		goto out;
+	}
+
+	if (!hostapd_cli_cmd_v("set ssid_protection %d", params->ssid_protection)) {
 		goto out;
 	}
 
@@ -760,7 +771,7 @@ int hostapd_ap_status(const struct device *dev __unused, struct net_if *net_ifac
 
 	os_memcpy(status->bssid, hapd->own_addr, WIFI_MAC_ADDR_LEN);
 	status->iface_mode = WIFI_MODE_AP;
-	status->band = wpas_band_to_zephyr(wpas_freq_to_band(iface->freq));
+	status->band = wpas_freq_to_zephyr_band(iface->freq);
 	key_mgmt = bss->wpa_key_mgmt;
 	proto = bss->wpa;
 	sae_pwe = bss->sae_pwe;

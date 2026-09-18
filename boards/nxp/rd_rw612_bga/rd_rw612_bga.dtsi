@@ -18,7 +18,7 @@
 		sw0 = &sw_4;
 		i2c-0 = &flexcomm2;
 		watchdog0 = &wwdt;
-		dmic-dev = &dmic0;
+		dmic0 = &dmic0;
 		mcuboot-button0 = &sw_4;
 		pwm-0 = &sctimer;
 	};
@@ -171,6 +171,10 @@ arduino_i2c: &flexcomm2 {
 			reg = <0x0 DT_SIZE_M(64)>;
 			erase-block-size = <DT_SIZE_K(4)>;
 			write-block-size = <1>;
+
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges;
 
 			partitions {
 				#address-cells = <1>;
@@ -374,4 +378,8 @@ nxp_8080_touch_panel_i2c: &arduino_i2c {
 /* standby mode maps to Sleep/Power Mode 3 */
 &standby {
 	min-residency-us = <1690>;
+};
+
+&powerquad {
+	status = "okay";
 };

@@ -197,6 +197,31 @@ void bt_foreach_bond(uint8_t id, void (*func)(const struct bt_bond_info *info,
 	}
 }
 
+enum bt_le_addr_res_support bt_le_bond_addr_res_support(uint8_t id, const bt_addr_le_t *peer)
+{
+	struct bt_keys *keys;
+
+	__ASSERT_NO_MSG(peer != NULL);
+
+	if (!IS_ENABLED(CONFIG_BT_GATT_AUTO_READ_CENTRAL_ADDR_RES)) {
+		/* Also ignores an answer stored by a previous firmware that
+		 * had the option enabled.
+		 */
+		return BT_LE_ADDR_RES_SUPPORT_UNKNOWN;
+	}
+
+	keys = bt_keys_find_addr(id, peer);
+	if (keys == NULL || (keys->flags & BT_KEYS_CENTRAL_ADDR_RES_KNOWN) == 0) {
+		return BT_LE_ADDR_RES_SUPPORT_UNKNOWN;
+	}
+
+	if ((keys->flags & BT_KEYS_CENTRAL_ADDR_RES_SUPPORT) != 0) {
+		return BT_LE_ADDR_RES_SUPPORT_YES;
+	}
+
+	return BT_LE_ADDR_RES_SUPPORT_NO;
+}
+
 void bt_keys_foreach_type(enum bt_keys_type type, void (*func)(struct bt_keys *keys, void *data),
 			  void *data)
 {
@@ -499,7 +524,7 @@ static int keys_set(const char *name, size_t len_rd, settings_read_cb read_cb,
 	 * previous version that did not enforce this requirement.
 	 */
 	if ((keys->flags & BT_KEYS_AUTHENTICATED) &&
-	    !((keys->flags & BT_KEYS_OOB) || (keys->flags & BT_KEYS_SC))) {
+	    !(keys->flags & (BT_KEYS_OOB | BT_KEYS_SC))) {
 		LOG_WRN("The keys for %s are downgraded to unauthenticated as they no longer meet "
 			"authentication requirements",
 			bt_addr_le_str(&addr));

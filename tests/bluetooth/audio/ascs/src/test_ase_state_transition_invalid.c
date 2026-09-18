@@ -3,6 +3,7 @@
 /*
  * Copyright (c) 2023 Codecoup
  * Copyright (c) 2024 Demant A/S
+ * Copyright (c) 2026 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,8 +14,10 @@
 #include <string.h>
 
 #include <zephyr/bluetooth/assigned_numbers.h>
+#include <zephyr/bluetooth/audio/ascs.h>
 #include <zephyr/bluetooth/audio/lc3.h>
 #include <zephyr/bluetooth/byteorder.h>
+#include <zephyr/bluetooth/hci_types.h>
 #include <zephyr/bluetooth/iso.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/kernel.h>
@@ -31,7 +34,8 @@
 #include <zephyr/ztest_test.h>
 #include <sys/types.h>
 
-#include "bap_unicast_server.h"
+#include "ascs.h"
+#include "audio/ascs_internal.h"
 #include "bap_stream.h"
 #include "conn.h"
 #include "gatt_expects.h"
@@ -61,16 +65,14 @@ static void test_ase_state_transition_invalid_before(void *f)
 {
 	struct test_ase_state_transition_invalid_fixture *fixture =
 		(struct test_ase_state_transition_invalid_fixture *)f;
-	struct bt_bap_unicast_server_register_param param = {
-		CONFIG_BT_ASCS_MAX_ASE_SNK_COUNT,
-		CONFIG_BT_ASCS_MAX_ASE_SRC_COUNT
+	struct bt_ascs_register_param param = {
+		.snk_cnt = CONFIG_BT_ASCS_MAX_ASE_SNK_COUNT,
+		.src_cnt = CONFIG_BT_ASCS_MAX_ASE_SRC_COUNT,
+		.cb = &mock_ascs_cb,
 	};
 	int err;
 
-	err = bt_bap_unicast_server_register(&param);
-	zassert_equal(err, 0, "unexpected err response %d", err);
-
-	err = bt_bap_unicast_server_register_cb(&mock_bap_unicast_server_cb);
+	err = bt_ascs_register(&param);
 	zassert_equal(err, 0, "unexpected err response %d", err);
 
 	memset(fixture, 0, sizeof(struct test_ase_state_transition_invalid_fixture));
@@ -82,17 +84,15 @@ static void test_ase_state_transition_invalid_before(void *f)
 
 static void test_ase_state_transition_invalid_after(void *f)
 {
+	struct test_ase_state_transition_invalid_fixture *fixture =
+		(struct test_ase_state_transition_invalid_fixture *)f;
 	int err;
 
-	ARG_UNUSED(f);
+	if (fixture->conn.info.state == BT_CONN_STATE_CONNECTED) {
+		mock_bt_conn_disconnected(&fixture->conn, BT_HCI_ERR_LOCALHOST_TERM_CONN);
+	}
 
-	err = bt_bap_unicast_server_unregister_cb(&mock_bap_unicast_server_cb);
-	zassert_equal(err, 0, "unexpected err response %d", err);
-
-	/* Sleep to trigger any pending state changes from unregister_cb */
-	k_sleep(K_SECONDS(1));
-
-	err = bt_bap_unicast_server_unregister();
+	err = bt_ascs_unregister();
 	zassert_equal(err, 0, "Unexpected err response %d", err);
 }
 
@@ -117,7 +117,7 @@ static void test_client_config_codec_expect_transition_error(struct bt_conn *con
 	};
 
 	test_ase_control_client_config_codec(conn, ase_id, NULL);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -134,7 +134,7 @@ static void test_client_config_qos_expect_transition_error(struct bt_conn *conn,
 	};
 
 	test_ase_control_client_config_qos(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -151,7 +151,7 @@ static void test_client_enable_expect_transition_error(struct bt_conn *conn, uin
 	};
 
 	test_ase_control_client_enable(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -168,7 +168,7 @@ static void test_client_receiver_start_ready_expect_transition_error(
 	};
 
 	test_ase_control_client_receiver_start_ready(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -185,7 +185,7 @@ static void test_client_receiver_start_ready_expect_ase_direction_error(
 	};
 
 	test_ase_control_client_receiver_start_ready(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -202,7 +202,7 @@ static void test_client_disable_expect_transition_error(struct bt_conn *conn, ui
 	};
 
 	test_ase_control_client_disable(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -219,7 +219,7 @@ static void test_client_receiver_stop_ready_expect_transition_error(
 	};
 
 	test_ase_control_client_receiver_stop_ready(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -236,7 +236,7 @@ static void test_client_receiver_stop_ready_expect_ase_direction_error(
 	};
 
 	test_ase_control_client_receiver_stop_ready(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -253,7 +253,7 @@ static void test_client_update_metadata_expect_transition_error(
 	};
 
 	test_ase_control_client_update_metadata(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -270,7 +270,7 @@ static void test_client_release_expect_transition_error(struct bt_conn *conn, ui
 	};
 
 	test_ase_control_client_release(conn, ase_id);
-	expect_bt_gatt_notify_cb_called_once(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
+	expect_bt_gatt_notify_cb_called_with(conn, BT_UUID_ASCS_ASE_CP, ase_cp, expected_error,
 					     sizeof(expected_error));
 	test_mocks_reset();
 }
@@ -553,24 +553,24 @@ static void test_server_config_codec_expect_error(struct bt_bap_stream *stream)
 		BT_AUDIO_LOCATION_FRONT_LEFT, 40U, 1, BT_AUDIO_CONTEXT_TYPE_UNSPECIFIED);
 	int err;
 
-	err = bt_bap_stream_reconfig(stream, &codec_cfg);
-	zassert_false(err == 0, "bt_bap_stream_reconfig unexpected success");
+	err = bt_ascs_reconfig_ase(stream->ep, &codec_cfg);
+	zassert_false(err == 0, "bt_ascs_reconfig_ase unexpected success");
 }
 
 static void test_server_receiver_start_ready_expect_error(struct bt_bap_stream *stream)
 {
 	int err;
 
-	err = bt_bap_stream_start(stream);
-	zassert_false(err == 0, "bt_bap_stream_start unexpected success");
+	err = bt_ascs_start_ase(stream->ep);
+	zassert_false(err == 0, "bt_ascs_start_ase unexpected success");
 }
 
 static void test_server_disable_expect_error(struct bt_bap_stream *stream)
 {
 	int err;
 
-	err = bt_bap_stream_disable(stream);
-	zassert_false(err == 0, "bt_bap_stream_disable unexpected success");
+	err = bt_ascs_disable_ase(stream->ep);
+	zassert_false(err == 0, "bt_ascs_disable_ase unexpected success");
 }
 
 #if defined(CONFIG_BT_BAP_UNICAST_CLIENT)
@@ -621,8 +621,8 @@ static void test_server_update_metadata_expect_error(struct bt_bap_stream *strea
 	};
 	int err;
 
-	err = bt_bap_stream_metadata(stream, meta, ARRAY_SIZE(meta));
-	zassert_false(err == 0, "bt_bap_stream_metadata unexpected success");
+	err = bt_ascs_metadata_ase(stream->ep, meta, ARRAY_SIZE(meta));
+	zassert_false(err == 0, "bt_ascs_metadata_ase unexpected success");
 }
 
 ZTEST_F(test_ase_state_transition_invalid, test_server_sink_state_codec_configured)
